@@ -1,7 +1,19 @@
 import os
 import math
-import dotenv
+from dotenv import load_dotenv
+import pathlib
 import arcpy
+
+
+def set_environment():
+    """
+    Set the environment for the script by loading the .env file and defining arcpy env settings. Assumes the .env file is in the same directory as this script.
+    """
+    script_dir = pathlib.Path(__file__).parent.resolve()
+    env_path = script_dir / '.env'
+    load_dotenv(dotenv_path=env_path)
+    arcpy.env.overwriteOutput = True
+    arcpy.env.workspace = os.getenv('GDB')  # Set the workspace from the .env file
 
 
 def get_projected_feature_class(in_fc, out_fc, out_coordinate_system, geographic_transformation):
@@ -22,70 +34,17 @@ def get_projected_feature_class(in_fc, out_fc, out_coordinate_system, geographic
             in_coor_system=arcpy.SpatialReference(4326)
         )
         print("Projection complete.")
+        return out_fc
 
     except Exception as e:
         print(f"Error during projection: {e}")
         exit() # Exit the script if projection fails
 
 
-# Path to your ORIGINAL sewer line feature class in WGS 1984
-original_feature_class_wgs84 = r"your_path\Sewer Line.gdb/SanitarySewerLines_ExportFeatures" # <--- !! Update this path !!
-
-# Path and name for the NEW feature class that will be created in the projected coordinate system
-# This should be in the same geodatabase or a different one
-projected_feature_class_path = r"your_path\Sewer Line.gdb/SanitarySewerLines_Projected" # <--- !! Update this path and name !!
-
-# The desired OUTPUT Projected Coordinate System (PCS)
-# This MUST be a PCS with linear units (like Feet or Meters)
-# You can find the spatial reference code (WKID) or path in ArcGIS Pro
-# Example for Texas State Plane Central FIPS 4203 Feet (WKID: 2277)
-out_coordinate_system = arcpy.SpatialReference(2277) # <--- !! Update WKID or path to your desired PCS (in Feet) !!
-
-# The Geographic Transformation needed to transform from WGS 1984 to your chosen PCS
-# This is crucial for accuracy. ArcGIS Pro will often suggest one.
-# You can find the transformation name or path in ArcGIS Pro's Project tool or documentation.
-# Example for WGS 1984 to NAD 1983 (which State Plane 2277 is based on)
-# You might need a specific NAD 1983 (2011) or other transformation depending on your data and area
-geographic_transformation = "WGS_1984_(ITRF00)_To_NAD_1983" # <--- !! Update this to the correct transformation !!
-
-
-# The name of the unique ID field in your feature class (should be the same in the projected data)
-id_field = "FACILITYID" # <--- !! Updated to FACILITYID !!
-
-# Names for the new fields to be added (these will be added to the projected feature class)
-from_adj_field = "from_adjacent_id" # Will hold the ID of the segment adjacent to the START point
-to_adj_field = "to_adjacent_id"   # Will hold the ID of the segment adjacent to the END point
-direction_float_field = "direction_float" # Will hold the bearing (0-360) from start to end
-direction_text_field = "direction_text" # Will hold the cardinal/intercardinal direction text
-
-# Set a small tolerance for comparing point locations in the PROJECTED coordinate system units
-# Since the output PCS is in FEET, this tolerance is in FEET.
-xy_tolerance = 0.001 # <--- Tolerance set to 0.001 FEET after projection
-print(f"Using XY Tolerance: {xy_tolerance} (in units of the projected coordinate system)")
-
-
-# --- 1. Project the feature class ---
-#print(f"Projecting '{original_feature_class_wgs84}' to '{projected_feature_class_path}'...")
-## Check if the original feature class exists before proceeding
-#if not arcpy.Exists(original_feature_class_wgs84):
-#    print(f"Error: Original feature class '{original_feature_class_wgs84}' does not exist.")
-#    print("Please ensure the path is correct.")
-#    exit() # Exit the script if the original feature class is not found
-## Define the output geodatabase path and feature class name
-#output_gdb = os.path.dirname(projected_feature_class_path)
-#output_name = os.path.basename(projected_feature_class_path)
-
-# Check if the output projected feature class already exists and delete it if you want to overwrite
-#if arcpy.Exists(projected_feature_class_path):
-#    print(f"Output feature class '{projected_feature_class_path}' already exists. Deleting...")
-#    arcpy.Delete_management(projected_feature_class_path)
-
-
-# --- 2. Check if required fields exist and add them if they don't (on the PROJECTED data) ---
 def add_required_fields(feature_class, from_adj_field, to_adj_field, direction_float_field, direction_text_field):
     """
     Add required fields to the feature class if they don't already exist.
-    :param feature_class: The feature class to check and add fields to.
+    :param feature_class: The projected feature class to check and add fields to.
     :param from_adj_field: The name of the field for the adjacent ID at the start point.
     :param to_adj_field: The name of the field for the adjacent ID at the end point.
     :param direction_float_field: The name of the field for the direction in degrees.
@@ -95,26 +54,7 @@ def add_required_fields(feature_class, from_adj_field, to_adj_field, direction_f
 
     existing_fields = [f.name for f in arcpy.ListFields(feature_class)]
 
-    # Determine the data type for the adjacent ID fields based on the id_field type
-    # We need to check the field type on the *projected* feature class
-    #id_field_type = "TEXT" # Default to TEXT
-    #id_field_type = None
-    #for field in arcpy.ListFields(feature_class):
-    #    if field.name == id_field:
-    #        id_field_type = field.type
-    #        break
-    #if id_field_type is None:
-    #    print(f"Error: ID field '{id_field}' not found in the PROJECTED feature class.")
-    #    # You might want to exit or raise an error here
-    #    exit() # Exiting script
-
-    # Determine the ArcGIS field type for the adjacent ID fields
-    # Use "TEXT" if the ID field is a string type, otherwise use "LONG"
-    # This ensures compatibility when writing the ID or None
-    #adj_field_arcgis_type = "TEXT"
     adj_field_length = 50
-
-    #print(f"Determined adjacent ID field type based on '{id_field}' ({id_field_type}): {adj_field_arcgis_type}")
 
     fields_to_add = {
         from_adj_field: "TEXT",
@@ -198,7 +138,6 @@ def get_direction_text(bearing):
         return None # Should not happen with bearing 0-360, but good practice
 
 
-# --- 3. Read feature geometries, calculate direction, and store in memory (from the PROJECTED data) ---
 def calculate_direction_values(feature_class, id_field):
     """
     Read the feature geometries from the feature class and calculate direction values.
@@ -248,6 +187,7 @@ def calculate_direction_values(feature_class, id_field):
             feature_data.append((oid, feat_id, sx, sy, ex, ey, bearing, direction_text))
 
     print(f"Read data and calculated direction for {len(feature_data)} features.")
+    return feature_data
 
 
 def get_adjacent_ids(feature_data, xy_tolerance):
@@ -259,7 +199,7 @@ def get_adjacent_ids(feature_data, xy_tolerance):
     """
     # Create a list of all start and end points with their associated feature info for adjacency check
     all_endpoints = []
-    for oid, feat_id, sx, sy, ex, ey in feature_data:
+    for oid, feat_id, sx, sy, ex, ey, _, _ in feature_data:
         all_endpoints.append({'id': feat_id, 'oid': oid, 'x': sx, 'y': sy}) # Start point
         all_endpoints.append({'id': feat_id, 'oid': oid, 'x': ex, 'y': ey}) # End point
 
@@ -268,13 +208,13 @@ def get_adjacent_ids(feature_data, xy_tolerance):
     to_adjacent_ids = {}
 
     # Initialize the dictionaries with None
-    for oid, feat_id, sx, sy, ex, ey in feature_data:
+    for oid, feat_id, sx, sy, ex, ey, _, _ in feature_data:
         from_adjacent_ids[oid] = None
         to_adjacent_ids[oid] = None
 
     # Calculate the values for 'from_adjacent_id' and 'to_adjacent_id'
     print("Comparing endpoints to find adjacent segments on projected data...")
-    for i, (oid, feat_id, sx, sy, ex, ey) in enumerate(feature_data):
+    for i, (oid, feat_id, sx, sy, ex, ey, _, _) in enumerate(feature_data):
 
         # Compare the start point of the current feature to ALL endpoints from OTHER features
         # This finds the segment connected at the START point (origin)
@@ -309,7 +249,7 @@ def get_adjacent_ids(feature_data, xy_tolerance):
     return from_adjacent_ids, to_adjacent_ids
 
 
-def update_fields(feature_class, feature_data, from_adj_field, to_adj_field, direction_float_field, direction_text_field):
+def update_fields(feature_class, feature_data, from_adj_field, to_adj_field, direction_float_field, direction_text_field, xy_tolerance):
     """
     Update the fields in the feature class with the calculated values.
     :param feature_class: The feature class to update.
@@ -317,6 +257,7 @@ def update_fields(feature_class, feature_data, from_adj_field, to_adj_field, dir
     :param to_adj_field: The name of the field for the adjacent ID at the end point.
     :param direction_float_field: The name of the field for the direction in degrees.
     :param direction_text_field: The name of the field for the direction as text.
+    :param xy_tolerance: Tolerance for comparing point locations in the projected coordinate system units.
     """
     print("Updating fields in the feature class...")
     # --- 5. Update the attribute table with calculated values (on the PROJECTED data) ---
@@ -331,6 +272,8 @@ def update_fields(feature_class, feature_data, from_adj_field, to_adj_field, dir
 
     # Create a dictionary to quickly look up calculated data by OID
     feature_data_dict = {item[0]: item for item in feature_data}
+
+    from_adjacent_ids, to_adjacent_ids = get_adjacent_ids(feature_data, xy_tolerance)
 
     try:
         # Check if editing is possible and start
@@ -368,7 +311,6 @@ def update_fields(feature_class, feature_data, from_adj_field, to_adj_field, dir
                     row[3] = None
                     row[4] = None
 
-
                 cursor.updateRow(row)
 
         edit.stopOperation()
@@ -382,4 +324,33 @@ def update_fields(feature_class, feature_data, from_adj_field, to_adj_field, dir
             edit.stopOperation()
             edit.stopEditing(False) # Abort edits
 
-print("\nScript finished.")
+
+def run():
+    set_environment()
+    input_fc_name = os.getenv('INPUT_FC')
+    #print(f"workspace: {arcpy.env.workspace}")
+    input_fc = os.path.join(arcpy.env.workspace, input_fc_name)
+    #print(f"Input feature class path: {input_fc}")
+    spatial_ref_wkid = 2277
+    out_coordinate_system = arcpy.SpatialReference(spatial_ref_wkid)
+    geographic_transformation = "WGS_1984_(ITRF00)_To_NAD_1983"
+    output_fc_name = os.path.join(arcpy.env.workspace, input_fc_name + f'_{str(spatial_ref_wkid)}')
+    projected_fc = get_projected_feature_class(input_fc, output_fc_name, out_coordinate_system, geographic_transformation)
+    from_adjacent_id = "from_adjacent_id"
+    to_adjacent_id = "to_adjacent_id"
+    direction_float = "direction_float"
+    direction_text = "direction_text"
+    add_required_fields(projected_fc, from_adjacent_id, to_adjacent_id, direction_float, direction_text)
+
+    id_field = "FACILITYID"
+    feature_data = calculate_direction_values(projected_fc, id_field)
+
+    xy_tolerance = 0.001
+    print(f"Using XY Tolerance: {xy_tolerance} (in units of the projected coordinate system)")
+    update_fields(projected_fc, feature_data, from_adjacent_id, to_adjacent_id, direction_float, direction_text, xy_tolerance)
+
+    print("\nScript finished.")
+
+
+if __name__ == "__main__":
+    run()
