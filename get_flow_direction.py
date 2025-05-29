@@ -331,20 +331,23 @@ def run():
     #print(f"workspace: {arcpy.env.workspace}")
     input_fc = os.path.join(arcpy.env.workspace, input_fc_name)
     #print(f"Input feature class path: {input_fc}")
+    # modify the spatial reference to the desired WKID
     spatial_ref_wkid = 2277
     out_coordinate_system = arcpy.SpatialReference(spatial_ref_wkid)
+    # modify the geographic transformation to be used for the projection
     geographic_transformation = "WGS_1984_(ITRF00)_To_NAD_1983"
     output_fc_name = os.path.join(arcpy.env.workspace, input_fc_name + f'_{str(spatial_ref_wkid)}')
     projected_fc = get_projected_feature_class(input_fc, output_fc_name, out_coordinate_system, geographic_transformation)
+    # modify the names of the fields to be added if desired
     from_adjacent_id = "from_adjacent_id"
     to_adjacent_id = "to_adjacent_id"
     direction_float = "direction_float"
     direction_text = "direction_text"
     add_required_fields(projected_fc, from_adjacent_id, to_adjacent_id, direction_float, direction_text)
-
+    # modify the name of the field that contains the unique ID of the features in the input feature class
     id_field = "FACILITYID"
     feature_data = calculate_direction_values(projected_fc, id_field)
-
+    # modify the XY tolerance value as needed; this is the tolerance for comparing point locations in the projected coordinate system units
     xy_tolerance = 0.001
     print(f"Using XY Tolerance: {xy_tolerance} (in units of the projected coordinate system)")
     update_fields(projected_fc, feature_data, from_adjacent_id, to_adjacent_id, direction_float, direction_text, xy_tolerance)
