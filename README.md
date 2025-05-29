@@ -19,7 +19,7 @@ The script operates on geospatial data - a feature class of lines stored in an *
 
 ## Dependencies
 
-These scripts require:
+The script requires:
 - **ArcGIS Pro** with **arcpy**
 - **Python 3.x** (as used in ArcGIS)
 - **dotenv**
