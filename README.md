@@ -1,4 +1,4 @@
-# Utility Flow Direction Assignment
+# Utility Materials Assignment
 
 This script adds adjacency and material information to the attribute table of a line feature class. Using each segment’s start and end points, it identifies the IDs of adjacent segments and determines the material type of those adjacent segments based on the `PIPE_TYPE` field. While this logic can be applied to any linear feature class, it was developed to support utility network modeling and downstream analysis.
 
