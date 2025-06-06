@@ -1,5 +1,7 @@
 # Utility Flow Direction Assignment
 
+TODO - add details on material (PIPE_TYPE) updates to this section, Overview, and Usage
+
 This script adds direction information to the attribute table of a line feature class - direction is determined using the starting and ending point. While this can be done for any line feature class, a model of utility networks brought about the need for it.
 
 ## Overview
@@ -44,9 +46,12 @@ After the script has been run, the following are recommended:
 1. Spot-checks of the direction values - check a few locations to ensure that the correct bearing and text direction are found in the respective fields. This can be done using a version of the sanitary sewer lines data styled with direction arrows. Though manual intervention has not been needed for the direction values so far, some of the results should still be checked.
 2. Population of the original material field ('PIPE_TYPE' field in the original run of the script) based on the values in the new fields - as of June 5, 2025, this is not done in the script though it may be incorporated later after manual population. In order to avoid issues with modifying an existing domain, it may be necessary to export the feature class produced by the script to a separate (new) geodatabase before attempting to edit the original material field. Note: all SQL statements below are to be used in the SQL option of 'Select by Attributes' in ArcGIS Pro
 
-- Select those where PIPE_TYPE should be updated where From_Material and To_Material match (cases of known material of segments on both sides of a segment with unknown material) : (PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND From_Material = To_Material 
-- With 'Calculate Field', set Material_Source equal to ‘Adjacency’ for the selected records
-- (PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND (From_Material = To_Material) AND From_Material = 'Unknown' 
+The steps below involve the material fields. 
+
+For cases where the original material field (PIPE_TYPE) should be updated and the From_Material and To_Material values match:
+1. `(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND From_Material = To_Material` 
+2. Using 'Calculate Field', set Material_Source equal to ‘Adjacency’ for the selected records
+3. `(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND (From_Material = To_Material) AND From_Material = 'Unknown'` 
 - With Calculate Field, set PIPE_TYPE equal to 0
 - (PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND (From_Material = To_Material) AND From_Material = 'Ductile Iron'
 - With Calculate Field, set PIPE_TYPE equal to 4
