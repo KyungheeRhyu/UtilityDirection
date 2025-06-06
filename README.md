@@ -1,6 +1,6 @@
 # Utility Flow Direction Assignment
 
-TODO - add details on material (PIPE_TYPE) updates to this section, Overview, and Usage
+TODO - add details on material (PIPE_TYPE) updates to this section, Overview, and Usage - see Kyunghee's branch 'modifications-2-materials'
 
 This script adds direction information to the attribute table of a line feature class - direction is determined using the starting and ending point. While this can be done for any line feature class, a model of utility networks brought about the need for it.
 
@@ -44,36 +44,48 @@ After the script is run, the output feature class can be found in the same geoda
 After the script has been run, the following are recommended:
 
 1. Spot-checks of the direction values - check a few locations to ensure that the correct bearing and text direction are found in the respective fields. This can be done using a version of the sanitary sewer lines data styled with direction arrows. Though manual intervention has not been needed for the direction values so far, some of the results should still be checked.
-2. Population of the original material field ('PIPE_TYPE' field in the original run of the script) based on the values in the new fields - as of June 5, 2025, this is not done in the script though it may be incorporated later after manual population. In order to avoid issues with modifying an existing domain, it may be necessary to export the feature class produced by the script to a separate (new) geodatabase before attempting to edit the original material field. Note: all SQL statements below are to be used in the SQL option of 'Select by Attributes' in ArcGIS Pro
+2. Population of the original material field ('PIPE_TYPE' field in the original run of the script) based on the values in the new fields - as of June 6, 2025, this is not done in the script, but the steps below should either be added to the existing script or to a new script. In order to avoid issues with modifying an existing domain, it may be necessary to export the feature class produced by the script to a separate (new) geodatabase before attempting to edit the original material field. Note: all SQL statements below (e.g. steps 1 and 3 below) are for use in the SQL option of 'Select by Attributes' in ArcGIS Pro
 
-The steps below involve the material fields. 
+The steps below involve the material fields. The two sets of 16 steps could be combined into a single set of 16 by wrapping each SQL statements in parentheses and connecting them with 'OR'. In each set of 16 steps below, the first two steps must be done first - the order of the remaining steps does not matter (and note that the order of steps 3-16 is different between the two sets below).
 
 For cases where the original material field (PIPE_TYPE) should be updated and the From_Material and To_Material values match:
 1. `(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND From_Material = To_Material` 
 2. Using 'Calculate Field', set Material_Source equal to ‘Adjacency’ for the selected records
 3. `(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND (From_Material = To_Material) AND From_Material = 'Unknown'` 
-- With Calculate Field, set PIPE_TYPE equal to 0
-- (PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND (From_Material = To_Material) AND From_Material = 'Ductile Iron'
-- With Calculate Field, set PIPE_TYPE equal to 4
-- (PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND (From_Material = To_Material) AND From_Material = 'Cast Iron'
-- With Calculate Field, set PIPE_TYPE equal to 3
+4. Using 'Calculate Field', set PIPE_TYPE equal to 0
+5. `(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND (From_Material = To_Material) AND From_Material = 'Ductile Iron'`
+6. Using 'Calculate Field', set PIPE_TYPE equal to 4
+7. `(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND (From_Material = To_Material) AND From_Material = 'Cast Iron'`
+8. Using 'Calculate Field', set PIPE_TYPE equal to 3
+9. `(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND (From_Material = To_Material) AND From_Material = 'PVC'` 
+10. Using 'Calculate Field', set PIPE_TYPE equal to 1
+11. `(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND (From_Material = To_Material) AND From_Material = 'RCP'`
+12. Using 'Calculate Field', set PIPE_TYPE equal to 2
+13. `(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND (From_Material = To_Material) AND From_Material = 'VCP'` 
+14. Using 'Calculate Field', set PIPE_TYPE equal to 5
+15. `(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND (From_Material = To_Material) AND From_Material = 'R.C.C.P'`
+16. Using 'Calculate Field', set PIPE_TYPE equal to 6
 
-TODO - finish editing/formatting section below
-(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND (From_Material = To_Material) AND From_Material = 'PVC' - selects 123 records - with Calculate Field, set PIPE_TYPE equal to 1
-(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND (From_Material = To_Material) AND From_Material = 'RCP' - selects 2 records - with Calculate Field, set PIPE_TYPE equal to 2
-(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND (From_Material = To_Material) AND From_Material = 'VCP' - selects 16 records - with Calculate Field, set PIPE_TYPE equal to 5
-(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND (From_Material = To_Material) AND From_Material = 'R.C.C.P' - selects 0 records - no action
-Select those where PIPE_TYPE should be updated where either From_Material or To_Material is not null and the other (From_Material or To_Material) is null (similar to a dead-end situation but flow is away from a starting point) - finish this
-Select records where segment with unknown material is adjacent only to a single segment with known material (similar to a dead-end situation but flow is away from a starting point) - select where:
-(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND ((From_Material IS NULL AND To_Material IS NOT null) OR (To_Material IS NULL AND From_Material IS NOT null)) AND (From_Material = 'R.C.C.P' OR To_Material = 'R.C.C.P') - selects 3 records -  with Calculate Field, set PIPE_TYPE equal to 6
-(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND ((From_Material IS NULL AND To_Material IS NOT null) OR (To_Material IS NULL AND From_Material IS NOT null)) AND (From_Material = 'VCP' OR To_Material = 'VCP') - selected 62 records - with Calculate Field, set PIPE_TYPE equal to 5
-(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND ((From_Material IS NULL AND To_Material IS NOT null) OR (To_Material IS NULL AND From_Material IS NOT null)) AND (From_Material = 'RCP' OR To_Material = 'RCP') - selected 15 records - with Calculate Field, set PIPE_TYPE equal to 2
-(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND ((From_Material IS NULL AND To_Material IS NOT null) OR (To_Material IS NULL AND From_Material IS NOT null)) AND (From_Material = 'PVC' OR To_Material = 'PVC') - selected 216 records - with Calculate Field, set PIPE_TYPE equal to 1
-(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND ((From_Material IS NULL AND To_Material IS NOT null) OR (To_Material IS NULL AND From_Material IS NOT null)) AND (From_Material = 'Cast Iron' OR To_Material = 'Cast Iron') - selected 2 records - with Calculate Field, set PIPE_TYPE equal to 3
-(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND ((From_Material IS NULL AND To_Material IS NOT null) OR (To_Material IS NULL AND From_Material IS NOT null)) AND (From_Material = 'Ductile Iron' OR To_Material = 'Ductile Iron') - selected 1 record - with Calculate Field, set PIPE_TYPE equal to 4
-(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND ((From_Material IS NULL AND To_Material IS NOT null) OR (To_Material IS NULL AND From_Material IS NOT null)) AND (From_Material = 'Unknown' OR To_Material = 'Unknown') - selected 595 records - with Calculate Field, set PIPE_TYPE equal to 0
-Can then:
-re-run PIPE_TYPE portion of script with input feature class being the modified feature class (the feature class after the steps above have been taken) 
-Repeat the steps above on the output of the run of the script
+For cases where the original material field (PIPE_TYPE) should be updated where either From_Material or To_Material is not null and the other (From_Material or To_Material) is null (visually, resembles a dead-end situation but flow is away from a starting point) - in other words, a segment with unknown material is adjacent only to a single segment with known material:
+1. `(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND ((From_Material IS NULL AND To_Material IS NOT null) OR (To_Material IS NULL AND From_Material IS NOT null))`
+2. Using 'Calculate Field', set Material_Source equal to ‘Adjacency’ for the selected records
+3. `(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND ((From_Material IS NULL AND To_Material IS NOT null) OR (To_Material IS NULL AND From_Material IS NOT null)) AND (From_Material = 'R.C.C.P' OR To_Material = 'R.C.C.P')`
+4. Using 'Calculate Field', set PIPE_TYPE equal to 6
+5. `(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND ((From_Material IS NULL AND To_Material IS NOT null) OR (To_Material IS NULL AND From_Material IS NOT null)) AND (From_Material = 'VCP' OR To_Material = 'VCP')` 
+6. Using 'Calculate Field', set PIPE_TYPE equal to 5
+7. `(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND ((From_Material IS NULL AND To_Material IS NOT null) OR (To_Material IS NULL AND From_Material IS NOT null)) AND (From_Material = 'RCP' OR To_Material = 'RCP')`
+8. Using 'Calculate Field', set PIPE_TYPE equal to 2
+9. `(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND ((From_Material IS NULL AND To_Material IS NOT null) OR (To_Material IS NULL AND From_Material IS NOT null)) AND (From_Material = 'PVC' OR To_Material = 'PVC')` 
+10. Using 'Calculate Field', set PIPE_TYPE equal to 1
+11. `(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND ((From_Material IS NULL AND To_Material IS NOT null) OR (To_Material IS NULL AND From_Material IS NOT null)) AND (From_Material = 'Cast Iron' OR To_Material = 'Cast Iron')` 
+12. Using 'Calculate Field', set PIPE_TYPE equal to 3
+13. `(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND ((From_Material IS NULL AND To_Material IS NOT null) OR (To_Material IS NULL AND From_Material IS NOT null)) AND (From_Material = 'Ductile Iron' OR To_Material = 'Ductile Iron')`
+14. Using 'Calculate Field', set PIPE_TYPE equal to 4
+15. `(PIPE_TYPE IS NULL Or PIPE_TYPE = 0) AND ((From_Material IS NULL AND To_Material IS NOT null) OR (To_Material IS NULL AND From_Material IS NOT null)) AND (From_Material = 'Unknown' OR To_Material = 'Unknown')`
+16. Using 'Calculate Field', set PIPE_TYPE equal to 0
 
+Following these steps, the portion of the script that modifies the material fields should be re-run, but the input feature class fed to the script will be the feature class modified in the two sets of 16 steps above.
 
+The output feature class of that second run of the script that modifies the material fields will then be modified using the sets of 16 steps above. 
+
+This process can be repeated a few times (which is why the 16 steps of SQL/Calculate-Field operations should be scripted). Each time the process is run, however, the output feature class should be spot-checked for accuracy.
