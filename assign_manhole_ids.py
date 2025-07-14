@@ -1,5 +1,6 @@
 import os
 from collections import Counter
+import datetime as dt
 import arcpy
 from shared import set_environment
 
@@ -46,7 +47,10 @@ def get_line_intersection(coord_pairs):
     """
     if len(coord_pairs) < 2:
         return ()
-    intersection_coords = [k for (k, v) in Counter(coord_pairs).items() if v > 1]
+    # Round the coordinates to 2 decimal places to avoid floating point precision issues - nearest hundredth of a meter should be fine but may need to be adjusted
+    rounded_pairs = [(round(x, 2), round(y, 2)) for (x, y) in coord_pairs]
+    print(f"Rounded coordinate pairs: {rounded_pairs}")
+    intersection_coords = [k for (k, v) in Counter(rounded_pairs).items() if v > 1]
     if not intersection_coords:
         print("No common coordinates found between the line segments.")
     else:
@@ -149,8 +153,9 @@ def assign_manhole_ids(line_layer, manhole_layer, spatial_reference):
 
 
 def run():
+    start_time = dt.datetime.now()
+    print(f"Script started at {start_time}")
     set_environment()
-    # TODO - create layers?
     line_fc = os.getenv('INPUT_FC')
     manhole_fc = os.getenv('MANHOLE_FC')
     line_layer = arcpy.MakeFeatureLayer_management(line_fc, "line_layer")
@@ -159,6 +164,9 @@ def run():
 
     # Call the function to assign manhole IDs
     assign_manhole_ids(line_layer, manhole_layer, spatial_reference)
+    end_time = dt.datetime.now()
+    duration = end_time - start_time
+    print(f"Script completed at {end_time} - Duration: {duration}")
 
 
 if __name__ == "__main__":
