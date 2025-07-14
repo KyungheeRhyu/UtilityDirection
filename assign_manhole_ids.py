@@ -97,17 +97,19 @@ def assign_manhole_ids(line_layer, manhole_layer, spatial_reference):
     """
     # add necessary fields to the line layer if they do not exist
     line_fields = [f.name for f in arcpy.ListFields(line_layer)]
-    new_fields = ['From_Manhole', 'To_Manhole']
+    from_manhole_field = 'from_manhole_id'
+    to_manhole_field = 'to_manhole_id'
+    new_fields = [from_manhole_field, to_manhole_field]
     for field in new_fields:
         if field not in line_fields:
             arcpy.AddField_management(line_layer, field, 'TEXT')
 
     # Use a search cursor to iterate through each line segment
-    with arcpy.da.UpdateCursor(line_layer, ['FACILITYID', 'To_Adjacent_ID', 'From_Manhole', 'To_Manhole']) as cursor:
+    with arcpy.da.UpdateCursor(line_layer, ['FACILITYID', 'to_adjacent_id', to_manhole_field]) as cursor:
         for row in cursor:
             facility_id = row[0]
             to_adjacent_id = row[1]
-            print(f"Processing line segment with FACILITYID: {facility_id}, To_Adjacent_ID: {to_adjacent_id}\n")
+            print(f"\nProcessing line segment with FACILITYID: {facility_id}, to_adjacent_id: {to_adjacent_id}")
 
             # Select the line segment and its 'to-adjacent' line segment
             arcpy.management.SelectLayerByAttribute(line_layer, 'NEW_SELECTION', f"FACILITYID in ('{facility_id}', '{to_adjacent_id}')")
@@ -131,7 +133,7 @@ def assign_manhole_ids(line_layer, manhole_layer, spatial_reference):
             # Assign the manhole ID to the appropriate fields
             if manhole_id:
                 # populate To_Manhole for segment being processed (segment A)
-                row[3] = manhole_id
+                row[2] = manhole_id
                 cursor.updateRow(row)
             # Select the 'to-adjacent' line segment (segment B) and assign the manhole ID to From_Manhole
             # may or may not be able to do this with other cursor still open
@@ -140,6 +142,39 @@ def assign_manhole_ids(line_layer, manhole_layer, spatial_reference):
             #    for adj_row in adj_cursor:
             #        adj_row[0] = manhole_id
             #        adj_cursor.updateRow(adj_row)
+
+    arcpy.management.SelectLayerByAttribute(line_layer, 'CLEAR_SELECTION')
+    # TODO - if this works, add separate function to avoid repetition
+    with arcpy.da.UpdateCursor(line_layer, ['FACILITYID', 'from_adjacent_id', from_manhole_field]) as cursor:
+        for row in cursor:
+            facility_id = row[0]
+            from_adjacent_id = row[1]
+            print(f"\nProcessing line segment with FACILITYID: {facility_id}, from_adjacent_id: {from_adjacent_id}")
+
+            # Select the line segment and its 'to-adjacent' line segment
+            arcpy.management.SelectLayerByAttribute(line_layer, 'NEW_SELECTION', f"FACILITYID in ('{facility_id}', '{from_adjacent_id}')")
+            print(f"Selected line segments: {arcpy.management.GetCount(line_layer)}")
+
+            # Get the coordinates of the selected line segments
+            line_coords = get_line_coordinates(line_layer)
+
+            line_intersection = get_line_intersection(line_coords)
+
+            # Select the manhole features that intersect the selected line segments
+            #arcpy.management.SelectLayerByLocation(manhole_layer, 'INTERSECT', line_layer)
+
+            # Find the corresponding manhole for the line segment
+            try:
+                manhole_id = find_manhole_id(line_intersection, spatial_reference, manhole_layer)
+            except Exception as e:
+                print(f"Error finding manhole ID: {e}")
+                manhole_id = None
+
+            # Assign the manhole ID to the appropriate fields
+            if manhole_id:
+                # populate from_manhole_id for segment being processed
+                row[2] = manhole_id
+                cursor.updateRow(row)
 
 
 def run():
