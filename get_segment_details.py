@@ -3,19 +3,23 @@ import datetime as dt
 import arcpy
 from shared import set_environment
 
-def get_connected_point_count(line_layer, point_layer):
+def get_connected_feature_count(line_layer, point_layer):
     """
-    Write number of points connected to each segment to a new field. (Assumes both layers use the same spatial reference.)
+    Write number of points and lines connected to each segment to a new field. (Assumes both layers use the same spatial reference.)
     :param line_layer: The feature layer containing sewer line segments.
     :param point_layer: The feature layer containing sewer line points including (or containing only) manholes.
     """
     line_fields = [f.name for f in arcpy.ListFields(line_layer)]
-    new_field = 'connected_point_count'
-    if new_field not in line_fields:
-        arcpy.AddField_management(line_layer, new_field, 'SHORT')
-        print(f"Added new field '{new_field}' to line layer.")
-    with arcpy.da.UpdateCursor(line_layer, ['OBJECTID', new_field]) as cursor:
-        print(f"Updating '{new_field}' field in line layer with connected point counts...")
+    point_count_field = 'connected_point_count'
+    if point_count_field not in line_fields:
+        arcpy.AddField_management(line_layer, point_count_field, 'SHORT')
+        print(f"Added new field '{point_count_field}' to line layer.")
+    line_count_field = 'connected_line_count'
+    if line_count_field not in line_fields:
+        arcpy.AddField_management(line_layer, line_count_field, 'SHORT')
+        print(f"Added new field '{line_count_field}' to line layer.")
+    print(f"Updating '{point_count_field}' field in line layer with connected point counts and '{line_count_field}' field with connected line counts...")
+    with arcpy.da.UpdateCursor(line_layer, ['OBJECTID', point_count_field, line_count_field]) as cursor:
         for row in cursor:
             arcpy.management.SelectLayerByAttribute(line_layer, 'NEW_SELECTION', f"OBJECTID = {row[0]}")
             #print(f"Selected line segment with OBJECTID: {row[0]}")
@@ -31,6 +35,17 @@ def get_connected_point_count(line_layer, point_layer):
             #print(f"Selected points overlapping with line segment: {selected_point_count}")
             #rint(f"Selected line segments: {arcpy.management.GetCount(line_layer)}\n")
             row[1] = int(selected_point_count)
+            #cursor.updateRow(row)
+            arcpy.management.SelectLayerByLocation(
+                in_layer=line_layer,
+                overlap_type="BOUNDARY_TOUCHES",
+                select_features=line_layer,
+                search_distance=None,
+                selection_type="NEW_SELECTION"
+            )
+            connected_line_count = arcpy.management.GetCount(line_layer)[0]
+            # no need to decrement this by one since selection type is NEW_SELECTION
+            row[2] = int(connected_line_count)
             cursor.updateRow(row)
 
 
@@ -45,7 +60,7 @@ def run():
     point_fc = os.getenv('POINT_FC')
     line_layer = arcpy.MakeFeatureLayer_management(line_fc, "line_layer")
     point_layer = arcpy.MakeFeatureLayer_management(point_fc, "point_layer")
-    get_connected_point_count(line_layer, point_layer)
+    get_connected_feature_count(line_layer, point_layer)
     end_time = dt.datetime.now()
     duration = end_time - start_time
     print(f"Script ended at {end_time}")
