@@ -5,10 +5,12 @@ import arcpy
 from shared import set_environment
 
 '''
+Full overview below not yet updated to reflect changes in this file.
+
 To be run after the adjacency IDs have been populated in the sewer line layer.
-1. Add fields ‘From_Manhole’ and ‘To_Manhole’ to table for line layer
+1. Add fields ‘from_point_id’, ‘to_point_id’, ‘from_point_type’, and ‘to_point_type’ to table for line layer
 2. Using lines layer with adjacent id’s populated, for each line segment (segment A):
-    a. Get FACILITYID of line and to_adjacent_id (segment B)
+    a. Get FACILITYID of line and adjacent line segment (segment B) using either to_adjacent_id or from_adjacent_id
     b. Select both lines
     c. Get coordinates of all points that make up both lines (separate function?)
     d. Get common coordinates to get intersection (separate function)
@@ -58,50 +60,55 @@ def get_line_intersection(coord_pairs):
         return intersection_coords[0]
 
 
-def find_manhole_id(coords, spatial_reference, manhole_layer):
+def find_point_info(coords, spatial_reference, point_layer):
     """
-    Find the manhole ID that corresponds to the given coordinates.
+    Find the ID and feature type of the point that corresponds to the given coordinates.
     :param coords: A tuple of coordinates (x, y) representing the line segment.
     :param spatial_reference: The spatial reference of the coordinates (arcpy SpatialReference object).
-    :param manhole_layer: The feature layer containing manholes.
-    :return: The manhole ID if found, otherwise None.
+    :param point_layer: The feature layer containing sewer line points.
+    :return: A dictionary containing the point ID and feature type if found, otherwise None.
     """
-    # Select the manhole features that intersect the line segment
-    #arcpy.management.SelectLayerByLocation(manhole_layer, 'INTERSECT', coords)
-    print(f"Selecting manhole features that intersect with coordinates: {coords}")
+    # Select the point features that intersect the line segment
+    #arcpy.management.SelectLayerByLocation(point_layer, 'INTERSECT', coords)
+    print(f"Selecting point features that intersect with coordinates: {coords}")
     try:
         point_geom = arcpy.PointGeometry(arcpy.Point(coords[0], coords[1]), spatial_reference)
     except Exception as e:
         print(f"Error creating PointGeometry from coordinates {coords}: {e}")
         return None
+    # adjust the search distance if necessary but hope to fix all topology issues before final run of script
     arcpy.management.SelectLayerByLocation(
-        in_layer=manhole_layer,
+        in_layer=point_layer,
         overlap_type="INTERSECT",
         select_features=point_geom,
-        search_distance="0.05 Meters",
+        search_distance=None,
         selection_type="NEW_SELECTION"
     )
 
-    print(f"Selected manhole features: {arcpy.management.GetCount(manhole_layer)}")
+    print(f"Selected point features: {arcpy.management.GetCount(point_layer)}")
 
-    # Get the manhole ID from the selected features
-    with arcpy.da.SearchCursor(manhole_layer, ['FACILITYID']) as cursor:
+    # Get the point ID from the selected features
+    with arcpy.da.SearchCursor(point_layer, ['FACILITYID', 'FEATURE_DE']) as cursor:
         for row in cursor:
-            return row[0]
-    return None
+            return {
+                'point_id': row[0],
+                'feature_type': row[1]
+            }
+    #return None
 
 
-def update_manhole_ids_single_side(line_layer, adjacent_id_field, adjacency_type, manhole_layer, manhole_id_field, spatial_reference):
+def update_point_info_single_side(line_layer, adjacent_id_field, adjacency_type, point_layer, point_id_field, point_type_field, spatial_reference):
     """
-    Update the manhole IDs for a single side (from or to) of the line segments.
+    Update the point IDs for a single side (from or to) of the line segments.
     :param line_layer: The feature layer containing sewer line segments.
     :param adjacent_id_field: The field containing the adjacent line segment ID.
     :param adjacency_type: The type of adjacency - either 'to' or 'from'. (only used for logging)
-    :param manhole_layer: The feature layer containing manholes.
-    :param manhole_id_field: The field to update with the manhole ID.
+    :param point_layer: The feature layer containing sewer line points.
+    :param point_id_field: The field to update with the point ID.
+    :param point_type_field: The field to update with the point type.
     :param spatial_reference: The spatial reference of the coordinates (arcpy SpatialReference object).
     """
-    with arcpy.da.UpdateCursor(line_layer, ['FACILITYID', adjacent_id_field, manhole_id_field]) as cursor:
+    with arcpy.da.UpdateCursor(line_layer, ['FACILITYID', adjacent_id_field, point_id_field, point_type_field]) as cursor:
         for row in cursor:
             facility_id = row[0]
             adjacent_id = row[1]
@@ -118,38 +125,41 @@ def update_manhole_ids_single_side(line_layer, adjacent_id_field, adjacency_type
 
             # Find the corresponding manhole for the line segment
             try:
-                manhole_id = find_manhole_id(line_intersection, spatial_reference, manhole_layer)
+                point_dict = find_point_info(line_intersection, spatial_reference, point_layer)
             except Exception as e:
-                print(f"Error finding manhole ID: {e}")
-                manhole_id = None
+                print(f"Error finding point dictionary: {e}")
+                point_dict = None
 
-            # Assign the manhole ID to the appropriate fields
-            if manhole_id:
-                # populate from_manhole_id for segment being processed
-                row[2] = manhole_id
+            # Assign the point ID to the appropriate fields
+            if point_dict:
+                # populate from_point_dict for segment being processed
+                row[2] = point_dict['point_id']
+                row[3] = point_dict['feature_type']
                 cursor.updateRow(row)
 
 
-def assign_manhole_ids(line_layer, manhole_layer, spatial_reference):
+def assign_point_ids(line_layer, point_layer, spatial_reference):
     """
-    Assign manhole IDs to line segments based on adjacent IDs and coordinates.
+    Assign point IDs to line segments based on adjacent IDs and coordinates.
     
     :param line_layer: The feature layer containing sewer line segments.
-    :param manhole_layer: The feature layer containing manholes.
+    :param point_layer: The feature layer containing sewer line points.
     :param spatial_reference: The spatial reference of the coordinates (arcpy SpatialReference object).
     """
     # add necessary fields to the line layer if they do not exist
     line_fields = [f.name for f in arcpy.ListFields(line_layer)]
-    from_manhole_field = 'from_manhole_id'
-    to_manhole_field = 'to_manhole_id'
-    new_fields = [from_manhole_field, to_manhole_field]
+    from_point_id_field = 'from_point_id'
+    to_point_id_field = 'to_point_id'
+    from_point_type_field = 'from_point_type'
+    to_point_type_field = 'to_point_type'
+    new_fields = [from_point_id_field, to_point_id_field, from_point_type_field, to_point_type_field]
     for field in new_fields:
         if field not in line_fields:
             arcpy.AddField_management(line_layer, field, 'TEXT')
 
-    update_manhole_ids_single_side(line_layer, 'to_adjacent_id', 'to', manhole_layer, to_manhole_field, spatial_reference)
+    update_point_info_single_side(line_layer, 'to_adjacent_id', 'to', point_layer, to_point_id_field, to_point_type_field, spatial_reference)
     arcpy.management.SelectLayerByAttribute(line_layer, 'CLEAR_SELECTION')
-    update_manhole_ids_single_side(line_layer, 'from_adjacent_id', 'from', manhole_layer, from_manhole_field, spatial_reference)
+    update_point_info_single_side(line_layer, 'from_adjacent_id', 'from', point_layer, from_point_id_field, from_point_type_field, spatial_reference)
 
 
 def run():
@@ -157,13 +167,13 @@ def run():
     print(f"Script started at {start_time}")
     set_environment()
     line_fc = os.getenv('INPUT_FC')
-    manhole_fc = os.getenv('MANHOLE_FC')
+    point_fc = os.getenv('POINT_FC')
     line_layer = arcpy.MakeFeatureLayer_management(line_fc, "line_layer")
-    manhole_layer = arcpy.MakeFeatureLayer_management(manhole_fc, "manhole_layer")
+    point_layer = arcpy.MakeFeatureLayer_management(point_fc, "point_layer")
     spatial_reference = arcpy.Describe(line_layer).spatialReference
 
-    # Call the function to assign manhole IDs
-    assign_manhole_ids(line_layer, manhole_layer, spatial_reference)
+    # Call the function to assign point IDs
+    assign_point_ids(line_layer, point_layer, spatial_reference)
     end_time = dt.datetime.now()
     duration = end_time - start_time
     print(f"Script completed at {end_time} - Duration: {duration}")
