@@ -14,10 +14,12 @@ To be run after the adjacency IDs have been populated in the sewer line layer.
     b. Select both lines
     c. Get coordinates of all points that make up both lines (separate function?)
     d. Get common coordinates to get intersection (separate function)
-    e. Select manhole from coordinates
-    f. Write manhole id to attribute table of line layer for:
-        i. To_Manhole for segment A
-        ii. From_Manhole for segment B
+    e. Select point from coordinates
+    f. Write the following to the attribute table of line layer for:
+        i. to_point_id for segment A
+        ii. from_point_id for segment B
+        iii. to_point_type for segment A
+        iv. from_point_type for segment B
 
 '''
 
@@ -73,17 +75,24 @@ def find_point_info(coords, spatial_reference, point_layer):
     print(f"Selecting point features that intersect with coordinates: {coords}")
     try:
         point_geom = arcpy.PointGeometry(arcpy.Point(coords[0], coords[1]), spatial_reference)
+        print(f"Point geometry created: {point_geom.firstPoint}")
     except Exception as e:
         print(f"Error creating PointGeometry from coordinates {coords}: {e}")
         return None
-    # adjust the search distance if necessary but hope to fix all topology issues before final run of script
-    arcpy.management.SelectLayerByLocation(
-        in_layer=point_layer,
-        overlap_type="INTERSECT",
-        select_features=point_geom,
-        search_distance=None,
-        selection_type="NEW_SELECTION"
-    )
+    try:
+        # adjust the search distance if necessary but hope to fix all topology issues before final run of script
+        arcpy.management.SelectLayerByLocation(
+            in_layer=point_layer,
+            overlap_type="INTERSECT",
+            select_features=point_geom,
+            #search_distance=None,
+            #search_distance="0.01 Meters",
+            search_distance="0.05 Meters",
+            selection_type="NEW_SELECTION"
+        )
+    except Exception as e:
+        print(f"Error selecting point features using SelectLayerByLocation: {e}")
+        return None
 
     print(f"Selected point features: {arcpy.management.GetCount(point_layer)}")
 
@@ -112,7 +121,7 @@ def update_point_info_single_side(line_layer, adjacent_id_field, adjacency_type,
         for row in cursor:
             facility_id = row[0]
             adjacent_id = row[1]
-            print(f"\n Processing line segment with FACILITYID: {facility_id} and {adjacency_type} adjacent id: {adjacent_id}")
+            print(f"\nProcessing line segment with FACILITYID: {facility_id} and {adjacency_type} adjacent id: {adjacent_id}")
 
             # Select the line segment and its adjacent line segment
             arcpy.management.SelectLayerByAttribute(line_layer, 'NEW_SELECTION', f"FACILITYID in ('{facility_id}', '{adjacent_id}')")
@@ -123,7 +132,7 @@ def update_point_info_single_side(line_layer, adjacent_id_field, adjacency_type,
 
             line_intersection = get_line_intersection(line_coords)
 
-            # Find the corresponding manhole for the line segment
+            # Find the corresponding point for the line segment
             try:
                 point_dict = find_point_info(line_intersection, spatial_reference, point_layer)
             except Exception as e:
@@ -174,6 +183,8 @@ def run():
 
     # Call the function to assign point IDs
     assign_point_ids(line_layer, point_layer, spatial_reference)
+    print(f'spatial reference of line layer: {spatial_reference.name}')
+    print(f'spatial reference of point layer: {arcpy.Describe(point_layer).spatialReference.name}')
     end_time = dt.datetime.now()
     duration = end_time - start_time
     print(f"Script completed at {end_time} - Duration: {duration}")
