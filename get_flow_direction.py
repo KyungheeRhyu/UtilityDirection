@@ -178,6 +178,8 @@ def calculate_direction_values(feature_class, id_field):
     return feature_data
 
 
+# TODO - ids of adjacent segments may not actually be necessary if the direction is always from start to end point
+# also, found some wrong ids at least at T-intersections - remove all related code if not needed
 def get_adjacent_ids(feature_data, xy_tolerance):
     """
     Get the adjacent IDs for each feature in the feature class.
