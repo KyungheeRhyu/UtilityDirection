@@ -62,6 +62,20 @@ def get_line_intersection(coord_pairs):
         return intersection_coords[0]
 
 
+# TODO - remove if not needed
+def get_line_endpoints(line_segment):
+    """
+    Get the start and end points of a line segment.
+    :param line_segment: A tuple containing the coordinates of the line segment.
+    :return: A tuple containing the start and end points of the line segment.
+    """
+    if not line_segment:
+        return None, None
+    start_point = (line_segment[0][0], line_segment[0][1])
+    end_point = (line_segment[-1][0], line_segment[-1][1])
+    return start_point, end_point
+
+
 def find_point_info(coords, spatial_reference, point_layer):
     """
     Find the ID and feature type of the point that corresponds to the given coordinates.
@@ -147,7 +161,7 @@ def update_point_info_single_side(line_layer, adjacent_id_field, adjacency_type,
                 cursor.updateRow(row)
 
 
-def assign_point_ids(line_layer, point_layer, spatial_reference):
+def assign_point_info(line_layer, point_layer, spatial_reference):
     """
     Assign point IDs to line segments based on adjacent IDs and coordinates.
     
@@ -166,9 +180,29 @@ def assign_point_ids(line_layer, point_layer, spatial_reference):
         if field not in line_fields:
             arcpy.AddField_management(line_layer, field, 'TEXT')
 
-    update_point_info_single_side(line_layer, 'to_adjacent_id', 'to', point_layer, to_point_id_field, to_point_type_field, spatial_reference)
-    arcpy.management.SelectLayerByAttribute(line_layer, 'CLEAR_SELECTION')
-    update_point_info_single_side(line_layer, 'from_adjacent_id', 'from', point_layer, from_point_id_field, from_point_type_field, spatial_reference)
+    #update_point_info_single_side(line_layer, 'to_adjacent_id', 'to', point_layer, to_point_id_field, to_point_type_field, spatial_reference)
+    #arcpy.management.SelectLayerByAttribute(line_layer, 'CLEAR_SELECTION')
+    #update_point_info_single_side(line_layer, 'from_adjacent_id', 'from', point_layer, from_point_id_field, from_point_type_field, spatial_reference)
+
+    with arcpy.da.UpdateCursor(line_layer, ['FACILITYID', to_point_id_field, from_point_id_field, to_point_type_field, from_point_type_field, 'SHAPE@']) as cursor:
+        for row in cursor:
+            #facility_id = row[0]
+            #to_point_id = row[1]
+            #from_point_id = row[2]
+            #to_point_type = row[3]
+            #from_point_type = row[4]
+            shape = row[5]
+            line_start = shape.firstPoint
+            start_point_info = find_point_info((line_start.X, line_start.Y), spatial_reference, point_layer)
+            if start_point_info:
+                row[2] = start_point_info['point_id']
+                row[4] = start_point_info['feature_type']
+            line_end = shape.lastPoint
+            end_point_info = find_point_info((line_end.X, line_end.Y), spatial_reference, point_layer)
+            if end_point_info:
+                row[1] = end_point_info['point_id']
+                row[3] = end_point_info['feature_type']
+            cursor.updateRow(row)
 
 
 def run():
@@ -182,7 +216,7 @@ def run():
     spatial_reference = arcpy.Describe(line_layer).spatialReference
 
     # Call the function to assign point IDs
-    assign_point_ids(line_layer, point_layer, spatial_reference)
+    assign_point_info(line_layer, point_layer, spatial_reference)
     print(f'spatial reference of line layer: {spatial_reference.name}')
     print(f'spatial reference of point layer: {arcpy.Describe(point_layer).spatialReference.name}')
     end_time = dt.datetime.now()
