@@ -134,7 +134,7 @@ def snap_line_endpoints(line_feature, utility_point, line_endpoints, tolerance):
         #    paths[1][1] = nearest.y
         modified = True
     else:
-        print(f"No snap found for {'start' if i == 0 else 'end'} of line {line_feature.attributes.get('FACILITYID', 'UNKNOWN')}")
+        print(f"No snap found for line {line_feature.attributes.get('FACILITYID', 'UNKNOWN')}")
 
     if modified:
         new_geom = {
