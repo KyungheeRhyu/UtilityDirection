@@ -1,6 +1,10 @@
 from arcgis.gis import GIS
-from arcgis.features import FeatureLayer
-from arcgis.geometry import Point, SpatialReference, project
+from arcgis.features import FeatureLayer, FeatureSet, use_proximity
+from arcgis.geometry import Point, SpatialReference, project #within cannot be imported
+#within cannot be imported from arcgis.geometry.functions
+#from arcgis.geometry.functions import within
+#from arcgis.geometry.filters import contains, within
+from arcgis.geometry.filters import intersects, within
 import math
 
 
@@ -21,9 +25,156 @@ SR_PROJECTED = SpatialReference(2276)
 
 SNAP_TOLERANCE_FEET = 0.3
 
+
+def get_buffer_feature_set(gis, item_title=None, point_layer=None, buffer_distance=None):
+    """
+    Return a FeatureSet of buffered features from the specified item in ArcGIS Online or a new buffer created from the given point layer.
+    :param gis: GIS object - the GIS connection to use
+    :param item_title: str or None - title of the existing item to fetch, if None, item will be created
+    :param point_layer: FeatureLayer or None - if provided, will use this layer to create buffers
+    :param buffer_distance: float or None - distance in feet to create buffers, can be None if using an existing item
+    :return: FeatureSet or None if item not found
+    """
+    search_results = gis.content.search(item_title, item_type="Feature Service", max_items=1)
+    print(f"Found {len(search_results)} search results for item title: {item_title}")
+    if search_results:
+        buffer_feature_layer = search_results[0].layers[0].query(where="1=1", return_geometry=True)
+    else:
+        buffer_feature_layer = use_proximity.create_buffers(point_layer, distances=[buffer_distance], units="Feet", output_name=item_title)
+    print(f"Buffer feature layer contains {len(buffer_feature_layer.features)} features.")
+    # TODO - clean this up if feature layer works as expected
+    buffer_feature_set = FeatureSet.from_dict({buffer_feature_layer})
+    #return buffer_feature_set
+    return buffer_feature_layer
+
 # --- GEOMETRY HELPERS ---
 
-def get_endpoints(polyline_feature):
+def get_endpoints(line_geom: dict) -> list:
+    """Extracts start and end Points from a line geometry."""
+    path = line_geom['paths'][0]
+    sr = line_geom['spatialReference']
+    return [
+        Point({"x": path[0][0], "y": path[0][1], "spatialReference": sr}),
+        Point({"x": path[-1][0], "y": path[-1][1], "spatialReference": sr})
+    ]
+
+
+def get_point_distance(p1: Point, p2: Point) -> float:
+    """Return the Euclidean distance between two Points."""
+    return math.hypot(p1.x - p2.x, p1.y - p2.y)
+
+
+def is_snapped(endpoint: Point, point_geom: Point, tolerance: float = SNAP_TOLERANCE_FEET) -> bool:
+    """
+    Check whether an endpoint is already snapped to the point.
+    :param endpoint: Point - the endpoint to check
+    :param point_geom: Point - the point geometry to check against
+    :param tolerance: float - the snapping tolerance in feet
+    :return: bool - True if the endpoint is within the tolerance of the point, False otherwise
+    """
+    return get_point_distance(endpoint, point_geom) <= tolerance
+
+
+def snap_endpoint_to_point(line_feature, endpoint_index, new_point: Point):
+    """
+    Modify the endpoint (start or end) of a line geometry.
+    :param line_feature: Feature object - the line feature to modify
+    :param endpoint_index: int - 0 for start, 1 for end
+    :param new_point: Point - the new location for the endpoint
+    """
+    path = line_feature.geometry['paths'][0]
+    if endpoint_index == 0:
+        path[0][0] = new_point.x
+        path[0][1] = new_point.y
+    else:
+        path[-1][0] = new_point.x
+        path[-1][1] = new_point.y
+    line_feature.geometry = {"paths": [path], "spatialReference": line_feature.geometry['spatialReference']}
+
+
+def process_buffer(buffer_feature, point_feature, line_layer):
+    """
+    For a single buffer:
+    - Get intersecting lines
+    - For each line, get endpoints
+    - If endpoint is inside the buffer and not snapped, add the updated line feature to the list of updated lines.
+    :param buffer_feature: Feature object - the buffer feature to process
+    :param point_feature: Feature object - the point feature to snap to
+    :param line_layer: FeatureLayer - the layer containing utility lines
+    :return: list of updated line features
+    """
+    buffer_geom = buffer_feature.geometry
+    point_geom = point_feature.geometry
+    updated_lines = []
+
+    print(f"Processing buffer around point {point_feature.attributes.get('FACILITYID')} with geometry: {buffer_geom}")
+
+    query_filter = intersects(buffer_geom)
+    # Spatial filter to get only intersecting lines
+    intersecting_lines = line_layer.query(geometry_filter=query_filter,
+                                          #spatial_relationship='intersects',
+                                          return_geometry=True,
+                                          out_fields="*").features
+
+    for line in intersecting_lines:
+        endpoints = get_endpoints(line.geometry)
+        print(f"Processing line {line.attributes.get('FACILITYID')} with endpoints: {endpoints}")
+        for i, ep in enumerate(endpoints):
+            # per docs, contains() from arcgis.geometry requires arcpy or Shapely
+            #if contains(buffer_geom, ep) and not is_snapped(ep, point_geom):
+            # can a single point be queried or should it be a layer? no TODO - make a layer from the point - ughh
+            intersecting_point = ep.query(geometry_filter=query_filter).features
+            if not intersecting_point:
+                print(f"Endpoint {i} of line {line.attributes.get('FACILITYID')} is not within buffer.")
+            else:
+                print(f"Endpoint {i} of line {line.attributes.get('FACILITYID')} is within buffer.")
+            if within(ep, buffer_geom):
+                print(f"Endpoint {i} of line {line.attributes.get('FACILITYID')} is within buffer.")
+            if within(ep, buffer_geom) and not is_snapped(ep, point_geom):
+                snap_endpoint_to_point(line, i, point_geom)
+                updated_lines.append(line)
+                print(f"Updated endpoint {i} of line {line.attributes.get('OBJECTID')} (snap not yet applied).")
+
+    return updated_lines
+
+
+def main():
+    updated = []
+    gis = GIS(GIS_LOGIN)
+    line_layer = FeatureLayer(LINE_URL)
+    point_layer = FeatureLayer(POINT_URL)
+
+    #buffer_feature_set = get_buffer_feature_set(gis, item_title='Test_buffer_around_subset_d_points', point_layer=point_layer, buffer_distance=SNAP_TOLERANCE_FEET)
+    buffer_feature_layer = get_buffer_feature_set(gis, item_title='Test_buffer_around_subset_d_points', point_layer=point_layer, buffer_distance=SNAP_TOLERANCE_FEET)
+    #print(f"Buffer feature set contains {len(buffer_feature_set.features)} features.")
+    #print(f"Sample buffer feature: {buffer_feature_set.features[0].as_dict()}")
+
+    #for buffer_feature in buffer_feature_set.features:
+    for buffer_feature in buffer_feature_layer.features:
+        point_oid = buffer_feature.attributes.get('FACILITYID')
+        print(f"Found buffer feature for point OID: {point_oid}")
+        if point_oid is None:
+            continue
+
+        point = point_layer.query(where=f"FACILITYID = '{point_oid}'", return_geometry=True).features
+        if not point:
+            continue
+
+        updated_lines = process_buffer(buffer_feature, point[0], line_layer)
+        updated.extend(updated_lines)
+
+    if updated:
+        print(f"Updating {len(updated)} modified lines...")
+        # Uncomment the following line to apply updates to the line layer
+        #result = line_layer.edit_features(updates=updated)
+        #print("Edit result:", result)
+    else:
+        print("No lines needed snapping.")
+
+
+# *********************************** OLD FUNCTIONS ***********************************
+# TODO - remove this function if not used
+def get_endpoints_old(polyline_feature):
     """
     Return start and end Point objects from a polyline geometry dict.
     :param polyline_feature - tuple containing a single Feature object: the polyline feature from which endpoints will be extracted
@@ -42,7 +193,8 @@ def get_endpoints(polyline_feature):
     return p1, p2
 
 
-def get_point_distance(p1, p2):
+# TODO - remove this function if not used
+def get_point_distance_old(p1, p2):
     """
     Euclidean distance between two arcgis Point objects.
     Only works if both inputs are Points; otherwise returns None.
@@ -215,4 +367,4 @@ def run():
     #    print("No features needed editing.")
 
 if __name__ == "__main__":
-    run()
+    main()
