@@ -159,7 +159,7 @@ def fix_dangles(lines, points):
     projected_lines = [(ln, project(ln.geometry, SR_WGS84, SR_PROJECTED)) for ln in lines]
     print(f"Projected {len(projected_points)} points and {len(projected_lines)} lines to EPSG:2276.")
 
-    # hold Point object of all line endpoints as snapping candidates
+    # hold Point objects of all line endpoints as snapping candidates
     all_line_endpoints = []
     for proj_geom in projected_lines:
         start, end = get_endpoints(proj_geom)
@@ -186,7 +186,6 @@ def fix_dangles(lines, points):
     return updated
 
 
-# --- MAIN SCRIPT ---
 
 def run():
     """
@@ -201,6 +200,7 @@ def run():
     points = get_features(point_layer)
     print(f"{len(lines)} lines and {len(points)} points loaded.")
     # TODO - call snap_line_endpoints() with sample params
+    snap_line_endpoints(lines[0], points[0], [Point({"x": 0, "y": 0, "spatialReference": SR_WGS84})], SNAP_TOLERANCE_FEET)
     return
     # TODO - uncomment after all calls to this point are working as expected
     #print("Fixing dangles...")
