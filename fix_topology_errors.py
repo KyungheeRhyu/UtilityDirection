@@ -50,7 +50,11 @@ def get_buffer_feature_set(gis, item_title=None, point_layer=None, buffer_distan
 # --- GEOMETRY HELPERS ---
 
 def get_endpoints(line_geom: dict) -> list:
-    """Extracts start and end Points from a line geometry."""
+    """
+    Extracts start and end Points from a line geometry.
+    :param line_geom: dict - the geometry of the line feature
+    :return: list of Point objects - start and end points of the line
+    """
     path = line_geom['paths'][0]
     sr = line_geom['spatialReference']
     return [
@@ -60,19 +64,28 @@ def get_endpoints(line_geom: dict) -> list:
 
 
 def get_point_distance(p1: Point, p2: Point) -> float:
-    """Return the Euclidean distance between two Points."""
+    """
+    Return the Euclidean distance between two Points.
+    :param p1: Point - first point
+    :param p2: Point - second point
+    :return: float - the distance between the two points
+    """
     return math.hypot(p1.x - p2.x, p1.y - p2.y)
 
 
-def is_snapped(endpoint: Point, point_geom: Point, tolerance: float = SNAP_TOLERANCE_FEET) -> bool:
+def is_snapped(endpoint: Point, target_point: Point, tolerance: float = 0.000001) -> bool:
     """
     Check whether an endpoint is already snapped to the point.
     :param endpoint: Point - the endpoint to check
-    :param point_geom: Point - the point geometry to check against
+    :param target_point: Point - the target point to check against
     :param tolerance: float - the snapping tolerance in feet
     :return: bool - True if the endpoint is within the tolerance of the point, False otherwise
     """
-    return get_point_distance(endpoint, point_geom) <= tolerance
+    distance = get_point_distance(endpoint, target_point)
+    snapped = distance <= tolerance
+    #print(f"Endpoint {endpoint} is {'snapped' if snapped else 'not snapped'} to target point {target_point} with gap distance {distance} feet.")
+    print(f"Endpoint is {'snapped' if snapped else 'not snapped'} to target point with gap distance of {distance} feet.")
+    return snapped
 
 
 def snap_endpoint_to_point(line_feature, endpoint_index, new_point: Point):
@@ -105,9 +118,10 @@ def process_buffer(buffer_feature, point_feature, line_layer):
     """
     buffer_geom = buffer_feature.geometry
     point_geom = point_feature.geometry
+    target_point = Point({"x": point_geom['x'], "y": point_geom['y'], "spatialReference": point_geom['spatialReference']})
     updated_lines = []
 
-    print(f"Processing buffer around point {point_feature.attributes.get('FACILITYID')} with geometry: {buffer_geom}")
+    print(f"Processing buffer around point {point_feature.attributes.get('FACILITYID')} with buffer geometry: {buffer_geom}")
 
     query_filter = intersects(buffer_geom)
     # Spatial filter to get only intersecting lines
@@ -118,20 +132,36 @@ def process_buffer(buffer_feature, point_feature, line_layer):
 
     for line in intersecting_lines:
         endpoints = get_endpoints(line.geometry)
-        print(f"Processing line {line.attributes.get('FACILITYID')} with endpoints: {endpoints}")
+        print(f"\nProcessing line {line.attributes.get('FACILITYID')} with endpoints: {endpoints}")
         for i, ep in enumerate(endpoints):
             # per docs, contains() from arcgis.geometry requires arcpy or Shapely
             #if contains(buffer_geom, ep) and not is_snapped(ep, point_geom):
-            # can a single point be queried or should it be a layer? no TODO - make a layer from the point - ughh
-            intersecting_point = ep.query(geometry_filter=query_filter).features
-            if not intersecting_point:
-                print(f"Endpoint {i} of line {line.attributes.get('FACILITYID')} is not within buffer.")
-            else:
-                print(f"Endpoint {i} of line {line.attributes.get('FACILITYID')} is within buffer.")
+            # can a single point be queried or should it be a layer? no TODO - make an in-memory layer from the point? - ughh
+            #ep_layer = FeatureLayer.from_dict({ep
+
+            #intersecting_point = ep.query(geometry_filter=query_filter).features
+            #if not intersecting_point:
+            #    print(f"Endpoint {i} of line {line.attributes.get('FACILITYID')} is not within buffer.")
+            #else:
+            #    print(f"Endpoint {i} of line {line.attributes.get('FACILITYID')} is within buffer.")
+
+            #print(f'type of endpoint {i}: {type(ep)}')
+            #print(f'type of target_point: {type(target_point)}')
+            print(f'sample endpoint {i}: {ep}')
+            print(f'buffer_geom: {buffer_geom}')
             if within(ep, buffer_geom):
                 print(f"Endpoint {i} of line {line.attributes.get('FACILITYID')} is within buffer.")
-            if within(ep, buffer_geom) and not is_snapped(ep, point_geom):
-                snap_endpoint_to_point(line, i, point_geom)
+            else:
+                print(f"Endpoint {i} of line {line.attributes.get('FACILITYID')} is NOT within buffer.")
+                continue
+
+            # first make a feature from the Point object? or return Feature object from get_endpoints()?
+
+            #print(f'intersection test: {ep.geometry.intersection(buffer_geom)}')
+            if within(ep, buffer_geom) and not is_snapped(ep, target_point, 0.0001):
+                snap_endpoint_to_point(line, i, target_point)
+                # TODO - before appending, second endpoint should be checked if it hasn't already been checked
+                #if i == 0:
                 updated_lines.append(line)
                 print(f"Updated endpoint {i} of line {line.attributes.get('OBJECTID')} (snap not yet applied).")
 
