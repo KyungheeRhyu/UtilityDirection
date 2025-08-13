@@ -94,6 +94,7 @@ def snap_endpoint_to_point(line_feature, endpoint_index, new_point: Point):
     :param line_feature: Feature object - the line feature to modify
     :param endpoint_index: int - 0 for start, 1 for end
     :param new_point: Point - the new location for the endpoint
+    :return: Feature object - the modified line feature with updated endpoint
     """
     path = line_feature.geometry['paths'][0]
     if endpoint_index == 0:
@@ -103,6 +104,7 @@ def snap_endpoint_to_point(line_feature, endpoint_index, new_point: Point):
         path[-1][0] = new_point.x
         path[-1][1] = new_point.y
     line_feature.geometry = {"paths": [path], "spatialReference": line_feature.geometry['spatialReference']}
+    return line_feature
 
 
 def process_buffer(buffer_feature, point_feature, line_layer):
@@ -133,27 +135,22 @@ def process_buffer(buffer_feature, point_feature, line_layer):
     for line in intersecting_lines:
         endpoints = get_endpoints(line.geometry)
         print(f"\nProcessing line {line.attributes.get('FACILITYID')} with endpoints: {endpoints}")
+
+        #ep1 = endpoints[0]
+        #ep2 = endpoints[1]
+        ## TODO - modify snap_endpoint_to_point to return just the corrected point? then construct the line feature from one or both of the edited endpoints?
+        #if within(ep1, buffer_geom) and not is_snapped(ep1, target_point, 0.0001):
+        #    line = snap_endpoint_to_point(line, 0, target_point)
+
         for i, ep in enumerate(endpoints):
-            # per docs, contains() from arcgis.geometry requires arcpy or Shapely
-            #if contains(buffer_geom, ep) and not is_snapped(ep, point_geom):
-            # can a single point be queried or should it be a layer? no TODO - make an in-memory layer from the point? - ughh
-            #ep_layer = FeatureLayer.from_dict({ep
 
-            #intersecting_point = ep.query(geometry_filter=query_filter).features
-            #if not intersecting_point:
-            #    print(f"Endpoint {i} of line {line.attributes.get('FACILITYID')} is not within buffer.")
-            #else:
+            #print(f'sample endpoint {i}: {ep}')
+            #print(f'buffer_geom: {buffer_geom}')
+            #if within(ep, buffer_geom):
             #    print(f"Endpoint {i} of line {line.attributes.get('FACILITYID')} is within buffer.")
-
-            #print(f'type of endpoint {i}: {type(ep)}')
-            #print(f'type of target_point: {type(target_point)}')
-            print(f'sample endpoint {i}: {ep}')
-            print(f'buffer_geom: {buffer_geom}')
-            if within(ep, buffer_geom):
-                print(f"Endpoint {i} of line {line.attributes.get('FACILITYID')} is within buffer.")
-            else:
-                print(f"Endpoint {i} of line {line.attributes.get('FACILITYID')} is NOT within buffer.")
-                continue
+            #else:
+            #    print(f"Endpoint {i} of line {line.attributes.get('FACILITYID')} is NOT within buffer.")
+            #    continue
 
             # first make a feature from the Point object? or return Feature object from get_endpoints()?
 
@@ -182,7 +179,7 @@ def main():
     #for buffer_feature in buffer_feature_set.features:
     for buffer_feature in buffer_feature_layer.features:
         point_oid = buffer_feature.attributes.get('FACILITYID')
-        print(f"Found buffer feature for point OID: {point_oid}")
+        print(f"\n*********\nFound buffer feature for point OID: {point_oid}")
         if point_oid is None:
             continue
 
