@@ -6,7 +6,9 @@ from arcgis.geometry import Point, SpatialReference, project #within cannot be i
 #from arcgis.geometry.filters import contains, within
 from arcgis.geometry.filters import intersects, within
 import math
+import logging
 
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 '''
 Fix topology errors in a utility line layer (in a feature service hosted in ArcGIS Online) by snapping endpoints of line segments to the nearest point within a specified tolerance.
@@ -23,28 +25,35 @@ POINT_URL = "https://services2.arcgis.com/kXGqZY4GIOcEYxoF/arcgis/rest/services/
 SR_WGS84 = SpatialReference(4326)
 SR_PROJECTED = SpatialReference(2276)
 
-SNAP_TOLERANCE_FEET = 0.3
+# TODO - remove these constants if not necessary
+BUFFER_WIDTH_FEET = 0.3
+SNAP_TOLERANCE_FEET = 0.000001
 
 
-def get_buffer_feature_set(gis, item_title=None, point_layer=None, buffer_distance=None):
+def get_buffer_feature_layer(gis, item_title=None, point_layer=None, buffer_distance=None):
     """
-    Return a FeatureSet of buffered features from the specified item in ArcGIS Online or a new buffer created from the given point layer.
+    Return a FeatureLayer of buffered features from the specified item in ArcGIS Online or a new buffer created from the given point layer.
     :param gis: GIS object - the GIS connection to use
     :param item_title: str or None - title of the existing item to fetch, if None, item will be created
     :param point_layer: FeatureLayer or None - if provided, will use this layer to create buffers
     :param buffer_distance: float or None - distance in feet to create buffers, can be None if using an existing item
-    :return: FeatureSet or None if item not found
+    :return: FeatureLayer or None if item not found
     """
     search_results = gis.content.search(item_title, item_type="Feature Service", max_items=1)
-    print(f"Found {len(search_results)} search results for item title: {item_title}")
+    logging.info(f"Found {len(search_results)} search results for item title: {item_title}")
     if search_results:
-        buffer_feature_layer = search_results[0].layers[0].query(where="1=1", return_geometry=True)
+        # query() returns a FeatureSet
+        #buffer_feature_set = search_results[0].layers[0].query(where="1=1", return_geometry=True)
+        buffer_feature_layer = search_results[0].layers[0]
     else:
+        # create_buffers() returns a FeatureLayer
         buffer_feature_layer = use_proximity.create_buffers(point_layer, distances=[buffer_distance], units="Feet", output_name=item_title)
-    print(f"Buffer feature layer contains {len(buffer_feature_layer.features)} features.")
+    buffer_feature_set = buffer_feature_layer.query(where="1=1", return_geometry=False)
+    logging.info(f"Buffer feature layer contains {len(buffer_feature_set.features)} features.")
     # TODO - clean this up if feature layer works as expected
-    buffer_feature_set = FeatureSet.from_dict({buffer_feature_layer})
+    #buffer_feature_set = FeatureSet.from_dict({buffer_feature_layer})
     #return buffer_feature_set
+    logging.debug(f"type of buffer_feature_layer: {type(buffer_feature_layer)}")
     return buffer_feature_layer
 
 # --- GEOMETRY HELPERS ---
@@ -73,6 +82,23 @@ def get_point_distance(p1: Point, p2: Point) -> float:
     return math.hypot(p1.x - p2.x, p1.y - p2.y)
 
 
+def get_nearest_point(point: Point, point_list: list) -> Point:
+    """
+    Find the nearest point in the point layer to the given point.
+    :param point: Point - the point to find the nearest neighbor for
+    :param point_list: list of Point objects - the list containing candidate points
+    :return: Point - the nearest point found, or None if no points are in the layer
+    """
+    nearest_point = None
+    min_distance = float("inf")
+    for candidate in point_list:
+        distance = get_point_distance(point, candidate.geometry)
+        if distance < min_distance:
+            min_distance = distance
+            nearest_point = candidate.geometry
+    return nearest_point
+
+
 def is_snapped(endpoint: Point, target_point: Point, tolerance: float = 0.000001) -> bool:
     """
     Check whether an endpoint is already snapped to the point.
@@ -83,8 +109,8 @@ def is_snapped(endpoint: Point, target_point: Point, tolerance: float = 0.000001
     """
     distance = get_point_distance(endpoint, target_point)
     snapped = distance <= tolerance
-    #print(f"Endpoint {endpoint} is {'snapped' if snapped else 'not snapped'} to target point {target_point} with gap distance {distance} feet.")
-    print(f"Endpoint is {'snapped' if snapped else 'not snapped'} to target point with gap distance of {distance} feet.")
+    #logging.info(f"Endpoint {endpoint} is {'snapped' if snapped else 'not snapped'} to target point {target_point} with gap distance {distance} feet.")
+    logging.info(f"Endpoint is {'snapped' if snapped else 'not snapped'} to target point with gap distance of {distance} feet.")
     return snapped
 
 
@@ -107,6 +133,97 @@ def snap_endpoint_to_point(line_feature, endpoint_index, new_point: Point):
     return line_feature
 
 
+def get_intersecting_buffer_features(line_feature, buffer_layer):
+    """
+    Get buffer feature(s) that intersect with the given line feature (should return between 0 and 2 buffer features if buffer around each point is < 1 foot).
+    :param line_feature: Feature object - the line feature to check against
+    :param buffer_layer: FeatureLayer - the layer containing buffer features
+    :return: list of intersecting buffer features
+    """
+    line_geom = line_feature.geometry
+    #for buffer_feature in buffer_feature_set.features:
+    #buffer_geom = buffer_feature.geometry
+    query_filter = intersects(line_geom)
+    intersecting_buffers = buffer_layer.query(geometry_filter=query_filter,
+                                          return_geometry=True,
+                                          out_fields="*").features
+    logging.info(f"Found {len(intersecting_buffers)} buffer features intersecting line {line_feature.attributes.get('FACILITYID')}.")
+    return intersecting_buffers
+
+
+def get_points_in_buffer(point_layer, buffer_feature):
+    """
+    Return the point(s) from the given point layer that fall within the given buffer feature.
+    :param point_layer: FeatureLayer object - the point layer containing points that may be within the given buffer
+    :param buffer_feature: Feature object - the buffer feature to check against
+    :return: list of points within the buffer
+    """
+    buffer_geom = buffer_feature.geometry
+    query_filter = buffer_geom.contains(point_layer.geometry)
+    return point_layer.query(geometry_filter=query_filter,
+                              return_geometry=True,
+                              out_fields="*").features
+
+
+def process_line(line_feature, buffer_layer, point_layer):
+    """
+    For a single line:
+    - Get endpoints
+    - For each endpoint, if endpoint is not snapped to a point within ______ (that point's buffer), snap it to that point
+    :param line_feature: Feature object - the line feature to process
+    :param buffer_layer: FeatureLayer object - the layer containing buffer features
+    :param point_layer: FeatureLayer object - the layer containing point features
+    :return: Feature object or None if no changes made
+    """
+    endpoints = get_endpoints(line_feature.geometry)
+    #point_geom = point_feature.geometry
+    #target_point = Point({"x": point_geom['x'], "y": point_geom['y'], "spatialReference": point_geom['spatialReference']})
+    updated = False
+
+    # TODO - build function from logic for a single endpoint if it works - then feed updated line feature to function to check (and possibly modify) second endpoint
+    ep1 = endpoints[0]
+
+    buffer_features = get_intersecting_buffer_features(line_feature, buffer_layer)
+    ep_in_question = None
+    for buffer_feature in buffer_features:
+        if ep1.within(buffer_feature.geometry):
+            ep_in_question = ep1
+            target_points = get_points_in_buffer(point_layer, buffer_feature)
+    #if ep_in_question:
+    if target_points:
+        # Snap the endpoint to the nearest target point
+        nearest_point = get_nearest_point(ep_in_question, target_points)
+        if nearest_point and not is_snapped(ep_in_question, nearest_point, SNAP_TOLERANCE_FEET):
+            line_feature = snap_endpoint_to_point(line_feature, 0, nearest_point)
+            updated = True
+    if updated:
+        logging.info(f"Snapped endpoint 0 of line {line_feature.attributes.get('FACILITYID')} to point {nearest_point}. Endpoint 1 NOT YET CHECKED")
+
+    #for buffer_feature in buffer_features:
+    #    points_in_buffer = get_points_in_buffer(point_layer, buffer_feature)
+    #    logging.info(f"Found {len(points_in_buffer)} points in buffer {buffer_feature.attributes.get('FACILITYID')}.")
+    #    target_points.extend(points_in_buffer)
+
+    # TODO - get target points nearest to endpoints
+    
+    #for ep in endpoints:
+    #    nearest_point = find_nearest_point(ep, point_feature)
+    #    if nearest_point:
+    #        target_points.append(nearest_point)
+
+    #for i, ep in enumerate(endpoints):
+    #    if is_snapped(ep, target_point, SNAP_TOLERANCE_FEET):
+    #        line_feature = snap_endpoint_to_point(line_feature, i, target_point)
+    #        updated = True
+    #        logging.info(f"Snapped endpoint {i} of line {line_feature.attributes.get('FACILITYID')} to point {point_feature.attributes.get('FACILITYID')}.")
+
+    if updated:
+        return line_feature
+    else:
+        return None
+
+
+# TODO - remove this function if not used
 def process_buffer(buffer_feature, point_feature, line_layer):
     """
     For a single buffer:
@@ -123,7 +240,7 @@ def process_buffer(buffer_feature, point_feature, line_layer):
     target_point = Point({"x": point_geom['x'], "y": point_geom['y'], "spatialReference": point_geom['spatialReference']})
     updated_lines = []
 
-    print(f"Processing buffer around point {point_feature.attributes.get('FACILITYID')} with buffer geometry: {buffer_geom}")
+    logging.info(f"Processing buffer around point {point_feature.attributes.get('FACILITYID')} with buffer geometry: {buffer_geom}")
 
     query_filter = intersects(buffer_geom)
     # Spatial filter to get only intersecting lines
@@ -134,7 +251,7 @@ def process_buffer(buffer_feature, point_feature, line_layer):
 
     for line in intersecting_lines:
         endpoints = get_endpoints(line.geometry)
-        print(f"\nProcessing line {line.attributes.get('FACILITYID')} with endpoints: {endpoints}")
+        logging.info(f"\nProcessing line {line.attributes.get('FACILITYID')} with endpoints: {endpoints}")
 
         #ep1 = endpoints[0]
         #ep2 = endpoints[1]
@@ -144,23 +261,23 @@ def process_buffer(buffer_feature, point_feature, line_layer):
 
         for i, ep in enumerate(endpoints):
 
-            #print(f'sample endpoint {i}: {ep}')
-            #print(f'buffer_geom: {buffer_geom}')
+            #logging.info(f'sample endpoint {i}: {ep}')
+            #logging.info(f'buffer_geom: {buffer_geom}')
             #if within(ep, buffer_geom):
-            #    print(f"Endpoint {i} of line {line.attributes.get('FACILITYID')} is within buffer.")
+            #    logging.info(f"Endpoint {i} of line {line.attributes.get('FACILITYID')} is within buffer.")
             #else:
-            #    print(f"Endpoint {i} of line {line.attributes.get('FACILITYID')} is NOT within buffer.")
+            #    logging.info(f"Endpoint {i} of line {line.attributes.get('FACILITYID')} is NOT within buffer.")
             #    continue
 
             # first make a feature from the Point object? or return Feature object from get_endpoints()?
 
-            #print(f'intersection test: {ep.geometry.intersection(buffer_geom)}')
+            #logging.info(f'intersection test: {ep.geometry.intersection(buffer_geom)}')
             if within(ep, buffer_geom) and not is_snapped(ep, target_point, 0.0001):
                 snap_endpoint_to_point(line, i, target_point)
                 # TODO - before appending, second endpoint should be checked if it hasn't already
                 #if i == 0:
                 updated_lines.append(line)
-                print(f"Updated endpoint {i} of line {line.attributes.get('OBJECTID')} (snap not yet applied).")
+                logging.info(f"Updated endpoint {i} of line {line.attributes.get('OBJECTID')} (snap not yet applied).")
 
     return updated_lines
 
@@ -171,32 +288,40 @@ def main():
     line_layer = FeatureLayer(LINE_URL)
     point_layer = FeatureLayer(POINT_URL)
 
-    #buffer_feature_set = get_buffer_feature_set(gis, item_title='Test_buffer_around_subset_d_points', point_layer=point_layer, buffer_distance=SNAP_TOLERANCE_FEET)
-    buffer_feature_layer = get_buffer_feature_set(gis, item_title='Test_buffer_around_subset_d_points', point_layer=point_layer, buffer_distance=SNAP_TOLERANCE_FEET)
-    #print(f"Buffer feature set contains {len(buffer_feature_set.features)} features.")
-    #print(f"Sample buffer feature: {buffer_feature_set.features[0].as_dict()}")
+    #buffer_feature_set = get_buffer_feature_layer(gis, item_title='Test_buffer_around_subset_d_points', point_layer=point_layer, buffer_distance=SNAP_TOLERANCE_FEET)
+    buffer_feature_layer = get_buffer_feature_layer(gis, item_title='Test_buffer_around_subset_d_points', point_layer=point_layer, buffer_distance=BUFFER_WIDTH_FEET)
+    #logging.info(f"Buffer feature set contains {len(buffer_feature_set.features)} features.")
+    #logging.info(f"Sample buffer feature: {buffer_feature_set.features[0].as_dict()}")
+    updated_lines = []
+
+    line_feature_set = line_layer.query(return_geometry=True)
+
+    for line_feature in line_feature_set.features:
+        logging.info(f"Processing line feature: {line_feature.attributes.get('FACILITYID')}")
+        updated_line = process_line(line_feature, buffer_feature_layer, point_layer)
+        if updated_line:
+            updated_lines.append(updated_line)
+
+    logging.info(f"Total updated lines to apply: {len(updated_lines)}")
 
     #for buffer_feature in buffer_feature_set.features:
-    for buffer_feature in buffer_feature_layer.features:
-        point_oid = buffer_feature.attributes.get('FACILITYID')
-        print(f"\n*********\nFound buffer feature for point OID: {point_oid}")
-        if point_oid is None:
-            continue
-
-        point = point_layer.query(where=f"FACILITYID = '{point_oid}'", return_geometry=True).features
-        if not point:
-            continue
-
-        updated_lines = process_buffer(buffer_feature, point[0], line_layer)
-        updated.extend(updated_lines)
-
-    if updated:
-        print(f"Updating {len(updated)} modified lines...")
-        # Uncomment the following line to apply updates to the line layer
-        #result = line_layer.edit_features(updates=updated)
-        #print("Edit result:", result)
-    else:
-        print("No lines needed snapping.")
+    #for buffer_feature in buffer_feature_layer.features:
+    #    point_oid = buffer_feature.attributes.get('FACILITYID')
+    #    logging.info(f"\n*********\nFound buffer feature for point OID: {point_oid}")
+    #    if point_oid is None:
+    #        continue
+    #    point = point_layer.query(where=f"FACILITYID = '{point_oid}'", return_geometry=True).features
+    #    if not point:
+    #        continue
+    #    updated_lines = process_buffer(buffer_feature, point[0], line_layer)
+    #    updated.extend(updated_lines)
+    #if updated:
+    #    logging.info(f"Updating {len(updated)} modified lines...")
+    #    # Uncomment the following line to apply updates to the line layer
+    #    #result = line_layer.edit_features(updates=updated)
+    #    #logging.info("Edit result:", result)
+    #else:
+    #    logging.info("No lines needed snapping.")
 
 
 if __name__ == "__main__":
