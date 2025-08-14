@@ -4,7 +4,7 @@ from arcgis.geometry import Point, SpatialReference, project #within cannot be i
 #within cannot be imported from arcgis.geometry.functions
 #from arcgis.geometry.functions import within
 #from arcgis.geometry.filters import contains, within
-from arcgis.geometry.filters import intersects, within
+from arcgis.geometry.filters import intersects, within, contains
 import math
 import logging
 
@@ -92,10 +92,13 @@ def get_nearest_point(point: Point, point_list: list) -> Point:
     nearest_point = None
     min_distance = float("inf")
     for candidate in point_list:
-        distance = get_point_distance(point, candidate.geometry)
+        logging.debug(f'type of candidate from point list: {type(candidate)}')
+        #distance = get_point_distance(point, candidate.geometry)
+        distance = get_point_distance(point, candidate)
         if distance < min_distance:
             min_distance = distance
-            nearest_point = candidate.geometry
+            #nearest_point = candidate.geometry
+            nearest_point = candidate
     return nearest_point
 
 
@@ -147,7 +150,7 @@ def get_intersecting_buffer_features(line_feature, buffer_layer):
     intersecting_buffers = buffer_layer.query(geometry_filter=query_filter,
                                           return_geometry=True,
                                           out_fields="*").features
-    logging.info(f"Found {len(intersecting_buffers)} buffer features intersecting line {line_feature.attributes.get('FACILITYID')}.")
+    logging.info(f"Found {len(intersecting_buffers)} buffer feature(s) intersecting line {line_feature.attributes.get('FACILITYID')}.")
     return intersecting_buffers
 
 
@@ -159,10 +162,14 @@ def get_points_in_buffer(point_layer, buffer_feature):
     :return: list of points within the buffer
     """
     buffer_geom = buffer_feature.geometry
-    query_filter = buffer_geom.contains(point_layer.geometry)
-    return point_layer.query(geometry_filter=query_filter,
+    # using within(), script does not throw an error but returns empty list
+    #query_filter = within(buffer_geom)
+    query_filter = intersects(buffer_geom)
+    features = point_layer.query(geometry_filter=query_filter,
                               return_geometry=True,
                               out_fields="*").features
+    # convert features to Points
+    return [Point({"x": f.geometry['x'], "y": f.geometry['y'], "spatialReference": f.geometry['spatialReference']}) for f in features]
 
 
 def process_line(line_feature, buffer_layer, point_layer):
@@ -182,11 +189,12 @@ def process_line(line_feature, buffer_layer, point_layer):
 
     # TODO - build function from logic for a single endpoint if it works - then feed updated line feature to function to check (and possibly modify) second endpoint
     ep1 = endpoints[0]
-
+    logging.debug(f'type of endpoint 1: {type(ep1)}')
     buffer_features = get_intersecting_buffer_features(line_feature, buffer_layer)
     ep_in_question = None
+    target_points = []
     for buffer_feature in buffer_features:
-        if ep1.within(buffer_feature.geometry):
+        if within(ep1, buffer_feature.geometry):
             ep_in_question = ep1
             target_points = get_points_in_buffer(point_layer, buffer_feature)
     #if ep_in_question:
@@ -196,8 +204,9 @@ def process_line(line_feature, buffer_layer, point_layer):
         if nearest_point and not is_snapped(ep_in_question, nearest_point, SNAP_TOLERANCE_FEET):
             line_feature = snap_endpoint_to_point(line_feature, 0, nearest_point)
             updated = True
-    if updated:
-        logging.info(f"Snapped endpoint 0 of line {line_feature.attributes.get('FACILITYID')} to point {nearest_point}. Endpoint 1 NOT YET CHECKED")
+            logging.info(f"Snapped endpoint 0 of line {line_feature.attributes.get('FACILITYID')} to point {nearest_point}. Endpoint 1 NOT YET CHECKED")
+    else:
+        logging.info(f"No target points found for endpoint 0 of line {line_feature.attributes.get('FACILITYID')}.")
 
     #for buffer_feature in buffer_features:
     #    points_in_buffer = get_points_in_buffer(point_layer, buffer_feature)
