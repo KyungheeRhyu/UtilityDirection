@@ -1,5 +1,5 @@
 from arcgis.gis import GIS
-from arcgis.features import FeatureLayer, FeatureSet, use_proximity
+from arcgis.features import FeatureLayer, Feature, FeatureSet, use_proximity
 from arcgis.geometry import Point, SpatialReference, project #within cannot be imported
 #within cannot be imported from arcgis.geometry.functions
 #from arcgis.geometry.functions import within
@@ -172,6 +172,39 @@ def get_points_in_buffer(point_layer, buffer_feature):
     return [Point({"x": f.geometry['x'], "y": f.geometry['y'], "spatialReference": f.geometry['spatialReference']}) for f in features]
 
 
+def process_endpoint(line_feature: Feature, endpoint: Point, endpoint_index: int, buffer_features, point_layer):
+    """
+    For a single endpoint:
+    - Check if endpoint is within any of the given buffer features
+    - If so, get points within that buffer and snap to nearest point if not already snapped
+    :param line_feature: Feature object - the line feature being processed
+    :param endpoint: Point object - the endpoint to process
+    :param endpoint_index: int - 0 for start, 1 for end
+    :param buffer_features: list of Feature objects - the buffer features to check against
+    :param point_layer: FeatureLayer object - the layer containing point features
+    :return: tuple (bool, Feature object (line)) - boolean indicating if endpoint of line was updated, and the line feature which may or may not be updated
+    """
+    updated = False
+    ep_in_question = None
+    target_points = []
+    for buffer_feature in buffer_features:
+        if within(endpoint, buffer_feature.geometry):
+            ep_in_question = endpoint
+            target_points = get_points_in_buffer(point_layer, buffer_feature)
+    if ep_in_question and target_points:
+        # Snap the endpoint to the nearest target point
+        nearest_point = get_nearest_point(ep_in_question, target_points)
+        if nearest_point and not is_snapped(ep_in_question, nearest_point, SNAP_TOLERANCE_FEET):
+            logging.info(f"Endpoint {ep_in_question} will be snapped to nearest point {nearest_point}.")
+            updated_line_feature = snap_endpoint_to_point(line_feature, endpoint_index, nearest_point)
+            logging.info(f"Snapped endpoint {endpoint_index} of line {line_feature.attributes.get('FACILITYID')} to point {nearest_point}.")
+            updated = True
+            return (updated, updated_line_feature)
+        else:
+            logging.info(f"Endpoint {ep_in_question} is already snapped to nearest point {nearest_point}.")
+    return (updated, line_feature)
+
+
 def process_line(line_feature, buffer_layer, point_layer):
     """
     For a single line:
@@ -180,33 +213,39 @@ def process_line(line_feature, buffer_layer, point_layer):
     :param line_feature: Feature object - the line feature to process
     :param buffer_layer: FeatureLayer object - the layer containing buffer features
     :param point_layer: FeatureLayer object - the layer containing point features
-    :return: Feature object or None if no changes made
+    :return: tuple (bool, Feature object (line)) - boolean indicating if line was updated, and the line feature which may or may not be updated
     """
     endpoints = get_endpoints(line_feature.geometry)
     #point_geom = point_feature.geometry
     #target_point = Point({"x": point_geom['x'], "y": point_geom['y'], "spatialReference": point_geom['spatialReference']})
-    updated = False
+    #updated = False
+    buffer_features = get_intersecting_buffer_features(line_feature, buffer_layer)
 
     # TODO - build function from logic for a single endpoint if it works - then feed updated line feature to function to check (and possibly modify) second endpoint
-    ep1 = endpoints[0]
-    logging.debug(f'type of endpoint 1: {type(ep1)}')
-    buffer_features = get_intersecting_buffer_features(line_feature, buffer_layer)
-    ep_in_question = None
-    target_points = []
-    for buffer_feature in buffer_features:
-        if within(ep1, buffer_feature.geometry):
-            ep_in_question = ep1
-            target_points = get_points_in_buffer(point_layer, buffer_feature)
-    #if ep_in_question:
-    if target_points:
-        # Snap the endpoint to the nearest target point
-        nearest_point = get_nearest_point(ep_in_question, target_points)
-        if nearest_point and not is_snapped(ep_in_question, nearest_point, SNAP_TOLERANCE_FEET):
-            line_feature = snap_endpoint_to_point(line_feature, 0, nearest_point)
-            updated = True
-            logging.info(f"Snapped endpoint 0 of line {line_feature.attributes.get('FACILITYID')} to point {nearest_point}. Endpoint 1 NOT YET CHECKED")
+    ep1, ep2 = endpoints[0], endpoints[1]
+    ep1_updated, processed_line_feature = process_endpoint(line_feature, ep1, 0, buffer_features, point_layer)
+    if ep1_updated:
+        ep2_updated, final_line_feature = process_endpoint(processed_line_feature, ep2, 1, buffer_features, point_layer)
     else:
-        logging.info(f"No target points found for endpoint 0 of line {line_feature.attributes.get('FACILITYID')}.")
+        ep2_updated, final_line_feature = process_endpoint(line_feature, ep2, 1, buffer_features, point_layer)
+    #logging.debug(f'type of endpoint 1: {type(ep1)}')
+    #buffer_features = get_intersecting_buffer_features(line_feature, buffer_layer)
+    #ep_in_question = None
+    #target_points = []
+    #for buffer_feature in buffer_features:
+    #    if within(ep1, buffer_feature.geometry):
+    #        ep_in_question = ep1
+    #        target_points = get_points_in_buffer(point_layer, buffer_feature)
+    ##if ep_in_question:
+    #if target_points:
+    #    # Snap the endpoint to the nearest target point
+    #    nearest_point = get_nearest_point(ep_in_question, target_points)
+    #    if nearest_point and not is_snapped(ep_in_question, nearest_point, SNAP_TOLERANCE_FEET):
+    #        line_feature = snap_endpoint_to_point(line_feature, 0, nearest_point)
+    #        updated = True
+    #        logging.info(f"Snapped endpoint 0 of line {line_feature.attributes.get('FACILITYID')} to point {nearest_point}. Endpoint 1 NOT YET CHECKED")
+    #else:
+    #    logging.info(f"No target points found for endpoint 0 of line {line_feature.attributes.get('FACILITYID')}.")
 
     #for buffer_feature in buffer_features:
     #    points_in_buffer = get_points_in_buffer(point_layer, buffer_feature)
@@ -226,10 +265,12 @@ def process_line(line_feature, buffer_layer, point_layer):
     #        updated = True
     #        logging.info(f"Snapped endpoint {i} of line {line_feature.attributes.get('FACILITYID')} to point {point_feature.attributes.get('FACILITYID')}.")
 
-    if updated:
-        return line_feature
+    if ep1_updated or ep2_updated:
+        logging.info(f"Updated at least one endpoint of line {final_line_feature.attributes.get('FACILITYID')} with new geometry.")
+        return True, final_line_feature
     else:
-        return None
+        logging.info(f"No updates made to line {line_feature.attributes.get('FACILITYID')}.")
+        return False, line_feature
 
 
 # TODO - remove this function if not used
@@ -301,17 +342,22 @@ def main():
     buffer_feature_layer = get_buffer_feature_layer(gis, item_title='Test_buffer_around_subset_d_points', point_layer=point_layer, buffer_distance=BUFFER_WIDTH_FEET)
     #logging.info(f"Buffer feature set contains {len(buffer_feature_set.features)} features.")
     #logging.info(f"Sample buffer feature: {buffer_feature_set.features[0].as_dict()}")
-    updated_lines = []
+    result_lines = []
+    updated_count = 0
 
     line_feature_set = line_layer.query(return_geometry=True)
 
     for line_feature in line_feature_set.features:
         logging.info(f"Processing line feature: {line_feature.attributes.get('FACILITYID')}")
-        updated_line = process_line(line_feature, buffer_feature_layer, point_layer)
-        if updated_line:
-            updated_lines.append(updated_line)
+        line_updated = False
+        line_updated, processed_line = process_line(line_feature, buffer_feature_layer, point_layer)
+        if line_updated:
+            updated_count += 1
+            result_lines.append(processed_line)
+        else:
+            result_lines.append(line_feature)
 
-    logging.info(f"Total updated lines to apply: {len(updated_lines)}")
+    logging.info(f"Total updated lines to apply: {updated_count}")
 
     #for buffer_feature in buffer_feature_set.features:
     #for buffer_feature in buffer_feature_layer.features:
